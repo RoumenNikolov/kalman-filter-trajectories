@@ -1,4 +1,5 @@
 import numpy as np
+from state_logger import StateLogger
 
 class Kalman2D:
     def __init__(self, F, Q, H, R, logger = None):
@@ -82,6 +83,8 @@ class Kalman2D:
         # Innovation (surprise): e_{k+1} = z_{k+1} - ž_{k+1|k}
         e_k1 = z_k1 - self.H @ s_k1_k
         e_k1 = z_k1 - z_k1_k
+        if self.logger is not None:
+            self.logger.append(e = e_k1, z = z_k1, z_hat = z_k1_k)
     
         return z_k1_k, e_k1
 
@@ -114,6 +117,8 @@ class Kalman2D:
         # Kalman gain:
         # K_{k+1} = P_{k+1|k} H^T S_{k+1}^{-1}
         K_k1 = P_k1_k @ self.H.T @ np.linalg.inv(S_k1)
+        if self.logger is not None:
+            self.logger.append(K = K_k1)
     
         return K_k1, S_k1
 
@@ -140,7 +145,8 @@ class Kalman2D:
         """
         # Updated state: s_{k+1|k+1} = s_{k+1|k} + K_{k+1} e_{k+1}
         s_k1_k1 = s_k1_k + K_k1 @ e_k1
-    
+        if self.logger is not None:
+            self.logger.append(s = s_k1_k1)
         return s_k1_k1
 
     def cov_update(self, P_k1_k, K_k1):
@@ -164,4 +170,6 @@ class Kalman2D:
         n = P_k1_k.shape[0]
         I = np.eye(n)
         P_k1_k1 = (I - K_k1 @ self.H) @ P_k1_k
+        if self.logger is not None:
+            self.logger.append(P = P_k1_k1)
         return P_k1_k1
