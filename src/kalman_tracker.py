@@ -1,7 +1,6 @@
 import numpy as np
 from state_logger import StateLogger
 
-
 class KalmanFilter:
     def __init__(self, F, Q, H, R, logger=None,
                  F_builder=None, Q_builder=None,
