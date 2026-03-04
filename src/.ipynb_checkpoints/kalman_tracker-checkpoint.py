@@ -1,175 +1,135 @@
 import numpy as np
 from state_logger import StateLogger
 
-class Kalman2D:
-    def __init__(self, F, Q, H, R, logger = None):
+
+class KalmanFilter:
+    def __init__(self, F, Q, H, R, logger=None,
+                 F_builder=None, Q_builder=None,
+                 B=None):
         """
+        2D Kalman filter with optional variable-dt and control input support.
+
         Parameters
         ----------
         F : (n, n) ndarray
-            State transition matrix.
+            State transition matrix (used when dt is not supplied to predict()).
         Q : (n, n) ndarray
-            Process noise covariance.
+            Process noise covariance (used when dt is not supplied to predict()).
         H : (m, n) ndarray
-            Measurement matrix, maps nD state to mD position:
-                z = H s + m.
+            Measurement matrix.  z = H s + noise.
         R : (m, m) ndarray
             Measurement noise covariance.
-        logger - Optionally uses a StateLogger instance to record states, covariances, and gains.
+        logger : StateLogger or None
+            Optional recorder for s, P, K, z, z_hat, e.
+        F_builder : callable(dt) -> (n, n) ndarray, optional
+            If supplied, predict() calls F_builder(dt) instead of self.F.
+            Required for variable-dt tracking (e.g. GPS).
+        Q_builder : callable(dt) -> (n, n) ndarray, optional
+            Same as F_builder but for Q. Supply together with F_builder.
+        B : (n, p) ndarray or None
+            Control input matrix.
+            s_{k+1|k} = F s_{k|k} + B u_k
         """
         self.F = F
         self.Q = Q
         self.H = H
         self.R = R
+        self.B = B
+        self.logger     = logger
+        self._F_builder = F_builder
+        self._Q_builder = Q_builder
 
-        self.logger = logger     # StateLogger or None
-
-    def predict(self, s_k_k, P_k_k):
+    def predict(self, s_k_k, P_k_k, dt=None, u=None):
         """
-        Kalman predict step for nD state.
-    
-        Implements:
-            s_{k+1|k} = F s_{k|k}
+        Kalman predict step.
+
+            s_{k+1|k} = F s_{k|k} + B u_k
             P_{k+1|k} = F P_{k|k} F^T + Q
-    
+
         Parameters
         ----------
-        s_k_k : (n, 1) ndarray
-            Current posterior state s_{k|k}.
-        P_k_k : (n, n) ndarray
-            Current posterior covariance P_{k|k}.
-        F : (n, n) ndarray
-            State transition matrix.
-        Q : (n, n) ndarray
-            Process noise covariance.
-    
+        s_k_k  : (n, 1) ndarray   current posterior state
+        P_k_k  : (n, n) ndarray   current posterior covariance
+        dt     : float or None
+            If provided and F_builder was given at construction,
+            F and Q are rebuilt for this time step.
+        u      : (p, 1) ndarray or None
+            Control input. Applied only if self.B is not None.
+
         Returns
         -------
         s_k1_k : (n, 1) ndarray
-            Predicted state s_{k+1|k}.
         P_k1_k : (n, n) ndarray
-            Predicted covariance P_{k+1|k}.
         """
-        s_k1_k = self.F @ s_k_k
-        P_k1_k = self.F @ P_k_k @ self.F.T + self.Q
+        # --- build F and Q ---
+        if dt is not None and self._F_builder is not None:
+            F = self._F_builder(dt)
+            Q = self._Q_builder(dt) if self._Q_builder is not None else self.Q
+        else:
+            F = self.F
+            Q = self.Q
+
+        # --- state prediction ---
+        s_k1_k = F @ s_k_k
+        if self.B is not None and u is not None:
+            s_k1_k = s_k1_k + self.B @ u
+
+        # --- covariance prediction ---
+        P_k1_k = F @ P_k_k @ F.T + Q
+
         return s_k1_k, P_k1_k
 
-    def z_innov(self, s_k1_k, z_k1):
+    def update(self, s_k1_k, P_k1_k, z_k1):
         """
-        Measurement model and innovation for mD position sensor.
-    
+        Kalman update step.
+
+            z_hat_{k+1|k} = H s_{k+1|k}
+            e_{k+1}       = z_{k+1} - z_hat_{k+1|k}
+            S_{k+1}       = H P_{k+1|k} H^T + R
+            K_{k+1}       = P_{k+1|k} H^T S_{k+1}^{-1}
+            s_{k+1|k+1}   = s_{k+1|k} + K_{k+1} e_{k+1}
+            P_{k+1|k+1}   = (I - K_{k+1} H) P_{k+1|k}
+
         Parameters
         ----------
-        s_k1_k : (n, 1) ndarray
-            Predicted state s_{k+1|k}.
-        z_k1 : (m, 1) ndarray
-            Actual measurement z_{k+1} from the sensor.
+        s_k1_k  : (n, 1) ndarray   predicted state
+        P_k1_k  : (n, n) ndarray   predicted covariance
+        z_k1    : (m, 1) ndarray   measurement
 
-        Internal
-        --------
-        H: Measurement matrix, maps nD state to mD position:
-           z = H s + m.
-           
         Returns
         -------
-        ẑ_k1_k : (m, 1) ndarray
-            Predicted measurement ẑ_{k+1|k} = H s_{k+1|k}.
-        e_k1 : (m, 1) ndarray
-            Innovation e_{k+1} = z_{k+1} - ž_{k+1|k}.
+        s_k1_k1 : (n, 1) ndarray   updated state
+        P_k1_k1 : (n, n) ndarray   updated covariance
         """
-        # Predicted measurement: ẑ_{k+1|k} = H s_{k+1|k}
-        z_k1_k = self.H @ s_k1_k
-    
-        # Innovation (surprise): e_{k+1} = z_{k+1} - ž_{k+1|k}
-        e_k1 = z_k1 - self.H @ s_k1_k
-        e_k1 = z_k1 - z_k1_k
+        # --- innovation ---
+        z_hat = self.H @ s_k1_k
+        e     = z_k1 - z_hat
+
+        # --- Kalman gain ---
+        S = self.H @ P_k1_k @ self.H.T + self.R
+        K = P_k1_k @ self.H.T @ np.linalg.inv(S)
+
+        # --- state update ---
+        s_k1_k1 = s_k1_k + K @ e
+
+        # --- covariance update ---
+        n       = P_k1_k.shape[0]
+        P_k1_k1 = (np.eye(n) - K @ self.H) @ P_k1_k
+
+        # --- log ---
         if self.logger is not None:
-            self.logger.append(e=e_k1, z=z_k1, z_hat=z_k1_k)
-    
-        return z_k1_k, e_k1
+            self.logger.append(
+                s=s_k1_k1, P=P_k1_k1,
+                K=K, z=z_k1, z_hat=z_hat, e=e
+            )
 
-    def kalman_gain(self, P_k1_k):
-        """
-        Kalman gain:
-            K_{k+1} = P_{k+1|k} H^T (H P_{k+1|k} H^T + R)^{-1}
-    
-        Parameters
-        ----------
-        P_k1_k : (n, n) ndarray
-            Predicted state covariance P_{k+1|k}.
+        return s_k1_k1, P_k1_k1
 
-        Internal
-        --------
-        H: Measurement matrix, maps nD state to mD position:
-           z = H s + m.
-    
-        Returns
-        -------
-        K_k1 : (n, m) ndarray
-            Kalman gain K_{k+1}.
-        S_k1 : (m, m) ndarray
-            Innovation covariance S_{k+1} = H P_{k+1|k} H^T + R.
+    def reset(self):
         """
-        # Innovation covariance in measurement space:
-        # S_{k+1} = H P_{k+1|k} H^T + R
-        S_k1 = self.H @ P_k1_k @ self.H.T + self.R
-    
-        # Kalman gain:
-        # K_{k+1} = P_{k+1|k} H^T S_{k+1}^{-1}
-        K_k1 = P_k1_k @ self.H.T @ np.linalg.inv(S_k1)
+        Clear the logger history. Useful when running the filter
+        over multiple segments with the same instance.
+        """
         if self.logger is not None:
-            self.logger.append(K=K_k1)
-    
-        return K_k1, S_k1
-
-
-    def state_update(self, s_k1_k, e_k1, K_k1):
-        """
-        Kalman state update with innovation:
-    
-            e_{k+1}      = z_{k+1} - H s_{k+1|k}
-            s_{k+1|k+1}  = s_{k+1|k} + K_{k+1} e_{k+1}
-    
-        Parameters
-        ----------
-        s_k1_k : (n, 1) ndarray
-            Predicted state s_{k+1|k}.
-
-        K_k1 : (n, m) ndarray
-            Kalman gain K_{k+1}.
-    
-        Returns
-        -------
-        s_k1_k1 : (n, 1) ndarray
-            Updated state estimate s_{k+1|k+1}.
-        """
-        # Updated state: s_{k+1|k+1} = s_{k+1|k} + K_{k+1} e_{k+1}
-        s_k1_k1 = s_k1_k + K_k1 @ e_k1
-        if self.logger is not None:
-            self.logger.append(s=s_k1_k1)
-        return s_k1_k1
-
-    def cov_update(self, P_k1_k, K_k1):
-        """
-        Kalman covariance update:
-    
-            P_{k+1|k+1} = (I - K_{k+1} H) P_{k+1|k}
-    
-        Parameters
-        ----------
-        P_k1_k : (n, n) ndarray
-            Predicted covariance P_{k+1|k}.
-        K_k1 : (n, m) ndarray
-            Kalman gain K_{k+1}.
-    
-        Returns
-        -------
-        P_k1_k1 : (n, n) ndarray
-            Updated covariance P_{k+1|k+1}.
-        """
-        n = P_k1_k.shape[0]
-        I = np.eye(n)
-        P_k1_k1 = (I - K_k1 @ self.H) @ P_k1_k
-        if self.logger is not None:
-            self.logger.append(P=P_k1_k1)
-        return P_k1_k1
+            for key in self.logger.data:
+                self.logger.data[key] = []
