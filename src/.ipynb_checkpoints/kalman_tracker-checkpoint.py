@@ -1,7 +1,6 @@
 import numpy as np
 from state_logger import StateLogger
 
-
 class KalmanFilter:
     def __init__(self, F, Q, H, R, logger=None,
                  F_builder=None, Q_builder=None,
@@ -88,7 +87,7 @@ class KalmanFilter:
             S_{k+1}       = H P_{k+1|k} H^T + R
             K_{k+1}       = P_{k+1|k} H^T S_{k+1}^{-1}
             s_{k+1|k+1}   = s_{k+1|k} + K_{k+1} e_{k+1}
-            P_{k+1|k+1}   = (I - K_{k+1} H) P_{k+1|k}
+            P_{k+1|k+1}   = (I - K_{k+1} H) P_{k+1|k} (I - K_{k+1} H)^T + K_{k+1} R K_{k+1}^T
 
         Parameters
         ----------
@@ -112,9 +111,10 @@ class KalmanFilter:
         # --- state update ---
         s_k1_k1 = s_k1_k + K @ e
 
-        # --- covariance update ---
+        # --- covariance update (Joseph form) ---
         n       = P_k1_k.shape[0]
-        P_k1_k1 = (np.eye(n) - K @ self.H) @ P_k1_k
+        I_KH    = np.eye(n) - K @ self.H
+        P_k1_k1 = I_KH @ P_k1_k @ I_KH.T + K @ self.R @ K.T
 
         # --- log ---
         if self.logger is not None:
