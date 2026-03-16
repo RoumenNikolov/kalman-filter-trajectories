@@ -27,10 +27,7 @@ pip install numpy matplotlib pandas
 ```
 
 ## Data
-Download GeoLife Trajectories 1.3 from:
-https://www.microsoft.com/en-us/download/details.aspx?id=52367
-
-Extract and copy only the labelled users to the data directory:
+The GeoLife dataset is included in this repository under:
 ```
 data/raw_data_trajectories/geolife_1.3/geolife_trajectories/data/
 ├── 010/
@@ -38,6 +35,8 @@ data/raw_data_trajectories/geolife_1.3/geolife_trajectories/data/
 └── 021/
 ```
 These are the only users with `labels.txt` files for car and taxi segments.
+If the data directory is missing, download GeoLife Trajectories 1.3 from:
+https://www.microsoft.com/en-us/download/details.aspx?id=52367 and extract the three labelled users to the path above.
 
 ## Usage
 Run the notebook top to bottom. No additional configuration required — all parameters ($\sigma_r$, $\sigma_a$) are set inline with explanations.
