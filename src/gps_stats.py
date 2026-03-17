@@ -101,7 +101,7 @@ class GPSStats:
 
         Returns
         -------
-        float  Acceleration RMS in m/s², or None if model != 'ca'.
+        float  Acceleration RMS in m/s^2, or None if model != 'ca'.
         """
         if self.model != 'ca':
             return None
@@ -121,9 +121,9 @@ class GPSStats:
         -------
         dict with keys:
             model        : str     Motion model ('cv' or 'ca').
-            acc_raw      : float   Acceleration RMS of raw GPS (m/s²).
-            acc_kf_pos   : float   Acceleration RMS of KF positions (m/s²).
-            acc_kf_state : float   Acceleration RMS from CA state vector (m/s²),
+            acc_raw      : float   Acceleration RMS of raw GPS (m/s^2).
+            acc_kf_pos   : float   Acceleration RMS of KF positions (m/s^2).
+            acc_kf_state : float   Acceleration RMS from CA state vector (m/s^2),
                                    or None for CV.
             rse_median   : float   Median innovation norm in metres.
             rse_p95      : float   95th percentile innovation norm in metres.
